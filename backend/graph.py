@@ -11,6 +11,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from prompts import EXTRACT_PROMPT, METADATA_PROMPT
 from langchain.prompts import ChatPromptTemplate
 from collections import deque
+from pyvis.network import Network
 import hashlib
 
 
@@ -232,42 +233,50 @@ class Graph:
         # Similarity search to find 2 closest nodes
         start_data = self.similarity_search(start_data, doc_type='node', k=1)[0]
         end_data = self.similarity_search(end_data, doc_type='node', k=1)[0]
-        # Get start and end node IDs
-        start_node = self.nodes.select("id").eq("data", start_data).limit(1).single().execute().data
-        end_node = self.nodes.select("id").eq("data", end_data).limit(1).single().execute().data
         
-        if not start_node or not end_node:
+        # Get start and end node IDs
+        start_node = self.nodes.select("id").eq("data", start_data).execute()
+        end_node = self.nodes.select("id").eq("data", end_data).execute()
+
+        if not start_node.data or not end_node.data:
             return []  # Start or end node does not exist
 
+        start_node_id = start_node.data[0]['id']
+        end_node_id = end_node.data[0]['id']
+
         # Initialize BFS
-        queue = deque([start_node['id']])
-        paths = {start_node['id']: [start_data]}
-        visited = set([start_node['id']])
+        queue = deque([start_node_id])
+        paths = {start_node_id: [start_data]}
+        visited = set([start_node_id])
 
         while queue:
             current_node_id = queue.popleft()
-            
+
             # Retrieve all adjacent nodes
-            edges = self.edges.select("target(*), source(*)").or_(
-                f"source.eq.{current_node_id}",
-                f"target.eq.{current_node_id}"
-            ).execute().data
-            print(f"{edges=}")
+            inc = self.edges.select("target!inner(id), source!inner(id)").eq("target.id", current_node_id).execute()
+            out = self.edges.select("target!inner(id), source!inner(id)").eq("source.id", current_node_id).execute()
+            edges = inc.data + out.data
 
             for edge in edges:
-                neighbor_node_id = edge['target'] if edge['source'] == current_node_id else edge['source']
+                # Extracting scalar node ID values
+                target_id = edge.get('target', {}).get('id')
+                source_id = edge.get('source', {}).get('id')
+                neighbor_node_id = target_id if source_id == current_node_id else source_id
+
                 if neighbor_node_id not in visited:
                     visited.add(neighbor_node_id)
-                    neighbor_data = self.nodes.select("data").eq("id", neighbor_node_id).single().execute().data['data']
-                    # Construct the path leading to this neighbor
-                    paths[neighbor_node_id] = paths[current_node_id] + [neighbor_data]
-                    if neighbor_node_id == end_node['id']:
-                        return paths[neighbor_node_id]  # Found the shortest path
-                    queue.append(neighbor_node_id)
+                    neighbor_data = self.nodes.select("data").eq("id", neighbor_node_id).execute()
+                    if neighbor_data.data:
+                        neighbor_data = neighbor_data.data[0]['data']
+                        # Construct the path leading to this neighbor
+                        paths[neighbor_node_id] = paths[current_node_id] + [neighbor_data]
+                        if neighbor_node_id == end_node_id:
+                            return paths[neighbor_node_id]  # Found the shortest path
+                        queue.append(neighbor_node_id)
 
-        return []
+        return []  # No path found
 
-    def get_edges(self, node_data: str, edge_direction: str = 'both') -> List[Dict[str, Any]]:
+    def get_adjacent_edges(self, node_data: str, edge_direction: str = 'both') -> List[Dict[str, Any]]:
         """
         Retrieve edges connected to a node based on the specified direction.
         
@@ -297,7 +306,7 @@ class Graph:
                 edges.append({
                     'type': 'outgoing',
                     'edge_id': edge['id'],
-                    'connected_node_data': target_node_data,
+                    'node': target_node_data,
                     'relationship': edge['data'],
                     'metadata': edge['metadata'],
                     'page_content': edge['page_content']
@@ -310,10 +319,33 @@ class Graph:
                 edges.append({
                     'type': 'incoming',
                     'edge_id': edge['id'],
-                    'connected_node_data': source_node_data,
+                    'node': source_node_data,
                     'relationship': edge['data'],
                     'metadata': edge['metadata'],
                     'page_content': edge['page_content']
                 })
 
         return edges
+    
+    def _get_edges(self):
+        edges = self.edges.select("*").execute().data
+        return edges
+    
+    def _get_nodes(self):
+        nodes = self.nodes.select("*").execute().data
+        return nodes
+    
+
+    def visualize(self, relations: List[List[Relation]]):
+        edges = self._get_edges()
+        nodes = self._get_nodes()
+
+
+
+
+if __name__ == "__main__":
+    graph = Graph()
+    node_1 = "agents"
+    node_2 = "bitter lesson"
+    path = graph.find_shortest_path(node_1, node_2)
+    print(path)
