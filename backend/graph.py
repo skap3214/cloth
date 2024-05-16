@@ -1,7 +1,8 @@
 import os
 from supabase import create_client
-from langchain.vectorstores.chroma import Chroma
 from langchain.embeddings.ollama import OllamaEmbeddings
+from langchain_openai import OpenAIEmbeddings
+from langchain_chroma import Chroma
 from langchain.embeddings.base import Embeddings
 from langchain.chat_models.base import BaseChatModel
 from langchain_groq import ChatGroq
@@ -25,7 +26,7 @@ class Graph:
     def __init__(
         self,
         collection_name: str = "graph",
-        embeddings_model: Embeddings = OllamaEmbeddings(model="nomic-embed-text", show_progress=True),
+        embeddings_model: Embeddings = OpenAIEmbeddings(model="text-embedding-3-small", show_progress=True),
         llm: BaseChatModel = ChatGroq(model="llama3-70b-8192", temperature=0.1),
         extract_prompt: ChatPromptTemplate = EXTRACT_PROMPT,
         metadata_prompt: ChatPromptTemplate = METADATA_PROMPT,
