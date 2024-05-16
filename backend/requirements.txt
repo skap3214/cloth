@@ -2,5 +2,6 @@ supabase
 langchain-openai
 langchain-community
 langchain-chroma
+langchain-groq
 langchain
 pyvis
