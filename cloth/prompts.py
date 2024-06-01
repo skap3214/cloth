@@ -1,32 +1,41 @@
 from langchain.prompts import ChatPromptTemplate
 
+
 # Prompt used to extract relations from documents
+EXTRACT_FORMAT_PROMPT = """\
+[
+    {{
+        "node_1": {{
+            "name": "Concept from extracted ontology",
+        }},
+        "edge": {{
+            "name": "relationship between the two concepts, node_1 and node_2 in one or two sentences",
+        }},
+        "node_2": {{
+            "name": "A related concept from extracted ontology",
+        }}
+    }}, {{...}}
+]
+"""
 EXTRACT_SYSTEM_PROMPT = """\
 You are a network graph maker who extracts terms and their relations from a given context. 
 You are provided with a context chunk (delimited by ```) Your task is to extract the ontology 
-of terms mentioned in the given context. These terms should represent the key concepts as per the context. 
-Thought 1: While traversing through each sentence, Think about the key terms mentioned in it.
-    Terms may include object, entity, location, organization, person, 
-    condition, acronym, documents, service, concept, etc.
-    Terms should be as atomistic and singular as possible
-
-Thought 2: Think about how these terms can have one on one relation with other terms.
-    Terms that are mentioned in the same sentence or the same paragraph are typically related to each other.
-    Terms can be related to many other terms
-
-Thought 3: Find out the relation between each such related pair of terms. 
-    Format your output as a list of json. Each element of the list contains a pair of terms
-    and the relation between them, like the follwing: 
-    [
-        {{
-            "node_1": "A concept from extracted ontology",
-            "node_2": "A related concept from extracted ontology",
-            "edge": "relationship between the two concepts, node_1 and node_2 in one or two sentences"
-        }}, {{...}}
-    ]\
+of terms mentioned in the given context. These terms should represent the key entities as per the context.
+You also need to find out the relation between each such related pair of terms.
+The type of terms you need to extract are listed below:
+{node_type}
+Be as atomistic and singular as possible.
+Think about how these terms can have one on one relation with other terms.
+Terms that are mentioned in the same sentence or the same paragraph are typically related to each other.
+The type of relations you need to extract are listed below:
+{edge_type}
+Format your output as a list of json. Each element of the list contains a pair of terms
+and the relation between them, like the following:
+""" + EXTRACT_FORMAT_PROMPT + """
+Make sure the strings are in doulbe quotes, escape special characters when needed, and your response should start and end with '[' and ']'
 """
 
-EXTRACT_HUMAN_PROMPT = "context: ```{input}```"
+EXTRACT_HUMAN_PROMPT = "context: ```{input}``` ONLY output the valid  JSON object. Start your response with ["
 
 EXTRACT_PROMPT = ChatPromptTemplate.from_messages([
     ("system", EXTRACT_SYSTEM_PROMPT),

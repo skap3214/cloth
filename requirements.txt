@@ -1,7 +1,7 @@
-supabase
-langchain-openai
-langchain-community
-langchain-chroma
-langchain-groq
-langchain
-pyvis
+supabase>=2.4.5
+langchain-openai>=0.1.3
+langchain-community>=0.0.38
+langchain-chroma>=0.1.1
+langchain-groq>=0.1.3
+langchain>=0.1.1.6
+pyvis>=0.3.2
