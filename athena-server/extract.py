@@ -15,6 +15,8 @@ def _extract_from_youtube(url: str) -> List[Document]:
     return documents
 
 def _extract_from_text(text: str, metadata: Optional[Dict] = None) -> List[Document]:
+    if not metadata:
+        metadata = {}
     documents = [Document(page_content=text, metadata=metadata)]
     documents = Config.SPLITTER.split_documents(documents)
     return documents

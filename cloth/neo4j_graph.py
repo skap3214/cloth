@@ -61,6 +61,12 @@ class Neo4jGraphstore:
         with self.driver.session() as session:
             session.run("MATCH (n) DETACH DELETE n")
         self.vectorstore._client.reset()
+        self.vectorstore = Chroma(
+            collection_name=self.collection_name,
+            embedding_function=self.embeddings_model,
+            persist_directory=self.persist_directory,
+        )
+        self.vectorstore._client_settings.allow_reset = True
         return True
 
     def extract_relations(self, documents: List[Document], stream: bool = False) -> List[List[Relation]]:
@@ -102,13 +108,13 @@ class Neo4jGraphstore:
 
     def _add_to_vectorstore(self, documents: List[Document], relations: List[List[Relation]]):
         nodes = set()
-        edges = list()
+        edges = set()
         for relation in relations:
             for rel in relation:
                 rel = rel.model_dump()
                 nodes.add(rel["node_1"]['name'])
                 nodes.add(rel["node_2"]['name'])
-                edges.append(rel['edge']['name'])
+                edges.add((rel['edge']['name'], rel["node_1"]['name'], rel["node_2"]['name']))
         node_documents = [Document(page_content=node, metadata={'doc_type': 'node'}) for node in list(nodes)]
         edge_documents = [Document(page_content=edge, metadata={'doc_type': 'edge'}) for edge in edges]
         [doc.metadata.update({'doc_type': 'raw'}) for doc in documents]
@@ -116,7 +122,7 @@ class Neo4jGraphstore:
         ids = self.vectorstore.add_documents(
             documents=all_documents,
             ids=[
-                generate_id(doc.page_content) if doc.metadata.get('doc_type') != 'edge' else generate_id(always_unique=True) 
+                generate_id(doc.page_content) if doc.metadata.get('doc_type') != 'edge' else generate_id('', always_unique=True) 
                 for doc in all_documents
             ]
         )

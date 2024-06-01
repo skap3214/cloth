@@ -1,9 +1,11 @@
 from typing import Optional, Literal
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from .extract import extract
 from .config import Config
+import json
 
 # Types
 
@@ -20,6 +22,13 @@ class GraphChat(BaseModel):
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 @app.get("/")
 def root():
     return "Athena API"
@@ -33,7 +42,15 @@ def graph_add(data: GraphAdd):
     documents = extract(data.text)
     add_stream = Config.GRAPH.add(documents, stream=True)
 
-    return StreamingResponse(add_stream)
+    def stream():
+        for chunk in add_stream:
+            chunk = {
+                'document': {'page_content': chunk['document'].page_content, 'metadata': chunk['document'].metadata},
+                'relatons': [rel.model_dump() for rel in chunk['relations']]
+            }
+            yield json.dumps(chunk).encode()
+
+    return StreamingResponse(stream())
 
 @app.post("/chat")
 def graph_chat(data: GraphChat):
