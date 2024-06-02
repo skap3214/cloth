@@ -6,7 +6,7 @@ from langchain.embeddings.base import Embeddings
 from langchain.chat_models.base import BaseChatModel
 from langchain_groq import ChatGroq
 from langchain.docstore.document import Document
-from typing import List, Optional, Dict, Any, Literal, Generator
+from typing import List, Optional, Dict, Any, Literal, Generator, Set
 from langchain_core.output_parsers import JsonOutputParser
 from .prompts import EXTRACT_PROMPT, METADATA_PROMPT
 from langchain.prompts import ChatPromptTemplate
@@ -33,6 +33,20 @@ class Neo4jGraphstore:
         neo4j_user: str = os.getenv("NEO4J_USER"),
         neo4j_password: str = os.getenv("NEO4J_PASSWORD")
     ) -> None:
+        """Create a Graphstore using Neo4j
+
+        Args:
+            collection_name (str, optional): Name of the collection. Used to create the vectorstore. Defaults to "graph".
+            embeddings_model (Embeddings, optional): embeddings model to use. Uses Langchain's Embeddings class. Defaults to OllamaEmbeddings(model="nomic-embed-text").
+            extract_prompt (ChatPromptTemplate, optional): prompt used to extract relations from a given document. Uses Langchain's ChatPrompt Template to define the prompt. Defaults to EXTRACT_PROMPT.
+            node_type (Optional[List[str]  |  str], optional): Type of nodes to extract from the documents. Defaults to all nodes.
+            edge_type (Optional[List[str]  |  str], optional): Type of edges/relations/links to extract from the documents. Defaults to all edges.
+            metadata_prompt (ChatPromptTemplate, optional): Metadata prompt to filter searches using an LLM. Defaults to METADATA_PROMPT.
+            persist_directory (str, optional): Directory to persist your vectorstore. Defaults to "./local/vectorstore".
+            neo4j_uri (str, optional): Neo4j URI. Defaults to os.getenv("NEO4J_URI").
+            neo4j_user (str, optional): Neo4j User. Defaults to os.getenv("NEO4J_USER").
+            neo4j_password (str, optional): Neo4j password. Defaults to os.getenv("NEO4J_PASSWORD").
+        """
         self.embeddings_model = embeddings_model
         self.llm = llm
         self.node_type = node_type or [
@@ -61,12 +75,6 @@ class Neo4jGraphstore:
         with self.driver.session() as session:
             session.run("MATCH (n) DETACH DELETE n")
         self.vectorstore._client.reset()
-        self.vectorstore = Chroma(
-            collection_name=self.collection_name,
-            embedding_function=self.embeddings_model,
-            persist_directory=self.persist_directory,
-        )
-        self.vectorstore._client_settings.allow_reset = True
         return True
 
     def extract_relations(self, documents: List[Document], stream: bool = False) -> List[List[Relation]]:
@@ -107,41 +115,75 @@ class Neo4jGraphstore:
         self._add_to_database(documents=documents, relations=final_relations)
 
     def _add_to_vectorstore(self, documents: List[Document], relations: List[List[Relation]]):
-        nodes = set()
-        edges = set()
-        for relation in relations:
-            for rel in relation:
-                rel = rel.model_dump()
-                nodes.add(rel["node_1"]['name'])
-                nodes.add(rel["node_2"]['name'])
-                edges.add(rel['edge']['name'])
-        node_documents = [Document(page_content=node, metadata={'doc_type': 'node'}) for node in list(nodes)]
-        edge_documents = [Document(page_content=edge, metadata={'doc_type': 'edge'}) for edge in edges]
-        [doc.metadata.update({'doc_type': 'raw'}) for doc in documents]
-        all_documents = node_documents + edge_documents + documents
-        ids = self.vectorstore.add_documents(
-            documents=all_documents,
-            ids=[
-                generate_id(doc.page_content) if doc.metadata.get('doc_type') != 'edge' else generate_id('', always_unique=True) 
-                for doc in all_documents
-            ]
-        )
-        # all_documents = []
-        # all_ids = []
+        node_set: Set[str] = set()
+        node_documents: List[Document] = []
+        node_ids: List[str] = []
 
-        # for document, rel_list in zip(documents, relations):
-        #     for relation in rel_list:
-        #         node_1 = relation.node_1
-        #         node_2 = relation.node_2
-        #         edge = relation.edge
-                
-        #         all_documents.append(Document(page_content=node_1.name, metadata={'doc_type': 'node'}))
-        #         all_ids.append(node_1.id)
-        #         all_documents.append(Document(page_content=node_2.name, metadata={'doc_type': 'node'}))
-        #         all_ids.append(node_2.id)
-        #         all_documents.append(Document(page_content=edge.name, metadata={'doc_type': 'node'}))
-        #         all_ids.append(edge.id)
-        #     all_documents.append(document)
+        edge_set: Set[str] = set()
+        edge_documents: List[Document] = []
+        edge_ids: List[str] = []
+
+        document_set: Set[str] = set()
+        raw_documents: List[Document] = []
+        raw_ids: List[str] = [] # Contains page_content as id
+
+        for relation, document in zip(relations, documents):
+            for rel in relation:
+                if (node_id:= rel.node_1.id) not in node_set:
+                    node_documents.append(
+                        Document(
+                            page_content=rel.node_1.name, 
+                            metadata={
+                                'doc_type': 'node'
+                            }
+                        )
+                    )
+                    node_ids.append(node_id)
+                    node_set.add(node_id)
+
+                if (node_id:= rel.node_2.id) not in node_set:
+                    node_documents.append(
+                        Document(
+                            page_content=rel.node_2.name, 
+                            metadata={
+                                'doc_type': 'node'
+                            }
+                        )
+                    )
+                    node_ids.append(node_id)
+                    node_set.add(node_id)
+
+                if (edge_id:= rel.edge.id) not in node_set:
+                    edge_documents.append(
+                        Document(
+                            page_content=rel.edge.name, 
+                            metadata={
+                                'doc_type': 'edge',
+                                'source_node': rel.node_1.id,
+                                'target_node': rel.node_2.id,
+                            }
+                        )
+                    )
+                    #TODO: decide id based on (node, edge, node) or (node, edge, node, document)?
+                    edge_ids.append(edge_id)
+                    edge_set.add(edge_id)
+
+            if (page_content:= document.page_content) not in document_set:
+                raw_documents.append(
+                    Document(
+                        page_content=document.page_content, 
+                        metadata={
+                            'doc_type': 'raw',
+                        }
+                    )
+                )
+                raw_ids.append(page_content)
+                document_set.add(page_content)
+
+        ids = self.vectorstore.add_documents(
+            documents=node_documents + edge_documents + raw_documents,
+            ids=node_ids + edge_ids + [generate_id(i) for i in raw_ids]
+        )
         return ids
 
     def _add_to_database(self, documents: List[Document], relations: List[List[Relation]]):
