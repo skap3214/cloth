@@ -114,7 +114,7 @@ class Neo4jGraphstore:
                 rel = rel.model_dump()
                 nodes.add(rel["node_1"]['name'])
                 nodes.add(rel["node_2"]['name'])
-                edges.add((rel['edge']['name'], rel["node_1"]['name'], rel["node_2"]['name']))
+                edges.add(rel['edge']['name'])
         node_documents = [Document(page_content=node, metadata={'doc_type': 'node'}) for node in list(nodes)]
         edge_documents = [Document(page_content=edge, metadata={'doc_type': 'edge'}) for edge in edges]
         [doc.metadata.update({'doc_type': 'raw'}) for doc in documents]
@@ -126,6 +126,22 @@ class Neo4jGraphstore:
                 for doc in all_documents
             ]
         )
+        # all_documents = []
+        # all_ids = []
+
+        # for document, rel_list in zip(documents, relations):
+        #     for relation in rel_list:
+        #         node_1 = relation.node_1
+        #         node_2 = relation.node_2
+        #         edge = relation.edge
+                
+        #         all_documents.append(Document(page_content=node_1.name, metadata={'doc_type': 'node'}))
+        #         all_ids.append(node_1.id)
+        #         all_documents.append(Document(page_content=node_2.name, metadata={'doc_type': 'node'}))
+        #         all_ids.append(node_2.id)
+        #         all_documents.append(Document(page_content=edge.name, metadata={'doc_type': 'node'}))
+        #         all_ids.append(edge.id)
+        #     all_documents.append(document)
         return ids
 
     def _add_to_database(self, documents: List[Document], relations: List[List[Relation]]):

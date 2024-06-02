@@ -44,9 +44,11 @@ def graph_add(data: GraphAdd):
 
     def stream():
         for chunk in add_stream:
+            document = chunk['document']
+            relations = chunk['relations']
             chunk = {
                 'document': {'page_content': chunk['document'].page_content, 'metadata': chunk['document'].metadata},
-                'relatons': [rel.model_dump() for rel in chunk['relations']]
+                'relations': [rel.model_dump() for rel in chunk['relations']]
             }
             yield json.dumps(chunk).encode()
 
