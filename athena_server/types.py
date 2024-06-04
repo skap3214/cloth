@@ -8,10 +8,14 @@ class ChatResponse(BaseModel):
     delta: str
 
 class GraphAdd(BaseModel):
-    user_id: Optional[str] = None
+    user_id: str
+    graph_id: Optional[str] = "1" # Make this None once we add multiple graphs per user
     text: str
     init: bool = False
+    stream: bool = True
 
 class GraphChat(BaseModel):
     query: str
     chat_type: Literal['node', 'edge', 'raw']
+    user_id: str
+    graph_id: Optional[str] = "1"

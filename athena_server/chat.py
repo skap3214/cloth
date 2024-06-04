@@ -8,7 +8,7 @@ from langchain.chains.summarize import load_summarize_chain
 from langchain.chains.combine_documents.map_reduce import MapReduceDocumentsChain, ReduceDocumentsChain
 from langchain.chains.combine_documents.stuff import StuffDocumentsChain
 from langchain.chains.llm import LLMChain
-from typing import Generator, Any, Dict, List, TypedDict, Literal
+from typing import Generator, Any, Dict, List, Optional, Literal
 from .types import ChatResponse
 from cloth.neo4j_graph import Neo4jGraphstore
 from cloth import Relation
@@ -50,7 +50,7 @@ class Agent:
         map_prompt: str = MAP_PROMPT,
         reduce_prompt: str = REDUCE_PROMPT,
         chat_memory = CHAT_MEMORY,
-        graph: Neo4jGraphstore = Neo4jGraphstore()
+        graph: Optional[Neo4jGraphstore] = None
     ) -> None:
         self.llm = llm
         self.system_prompt = system_prompt
@@ -87,7 +87,7 @@ class Agent:
             document_variable_name='docs',
             return_intermediate_steps=False
         )
-        self.graph = graph
+        self.graph = graph or Neo4jGraphstore()
 
 
     def _chat(self, query: str, information: str, save_chat_history: bool = True) -> Generator[str, Any, None]:
@@ -107,16 +107,16 @@ class Agent:
             self.chat_memory.save_context({'input': query}, {'output': response})
     
     def _relation_to_string(self, relation: Relation):
-        template = f"""Source: {relation.node_1.name}\nLink: {relation.edge.name}\nTarget: {relation.node_2.name}"""
+        template = f"""Source: {relation.node_1.name}Link: {relation.edge.name}Target: {relation.node_2.name}"""
         return template
 
-    def _node_search(self, query: str, k: int = 3) -> Dict[str, Any]:
+    def _node_search(self, query: str, metadata: Dict, k: int = 3) -> Dict[str, Any]:
         # Search based on most similar nodes to the query
-        similar_nodes = self.graph.similarity_search(query, doc_type='node', k=k)
+        similar_nodes = self.graph.similarity_search(query, doc_type='node', k=k, filter=metadata)
         all_documents: List[Document] = []
         all_relations: List[Relation] = []
         for node in similar_nodes:
-            adj = self.graph.get_adjacent_edges(node)
+            adj = self.graph.get_adjacent_edges(node, graph_metadata=metadata)
             outgoing = adj['outgoing']
             incoming = adj['incoming']
             both = outgoing + incoming
@@ -129,9 +129,9 @@ class Agent:
             'relations': all_relations
         }
     
-    def chat_node(self, query: str):
+    def chat_node(self, query: str, metadata: Dict):
         # Perform search over nodes and summarize any documents
-        output = self._node_search(query)
+        output = self._node_search(query, metadata=metadata)
         nodes = output['nodes']
         documents = output['documents']
         relations = output['relations']
@@ -145,9 +145,9 @@ class Agent:
         yield ChatResponse(
             sources=relations,
             type='intermediate',
-            delta=f"Summary of nodes:\n{summary['output_text']}"
+            delta=f"Summary of nodes:{summary['output_text']}Output:"
         )
-
+        print(f"Output:")
         for chunk in self._chat(query, summary, False):
             yield ChatResponse(
                 sources=relations,
@@ -155,13 +155,13 @@ class Agent:
                 delta=chunk
             )
 
-    def _edge_search(self, query: str, k: int = 7) -> Dict[str, Any]:
+    def _edge_search(self, query: str, metadata: Dict, k: int = 7) -> Dict[str, Any]:
         # Search based on most similar nodes to the query
-        similar_edges = self.graph.similarity_search(query, doc_type='edge', k=k)
+        similar_edges = self.graph.similarity_search(query, doc_type='edge', k=k, filter=metadata)
         all_documents: List[Document] = []
         all_relations: List[Relation] = []
         for edge in similar_edges:
-            adj = self.graph.get_adjacent_nodes(edge)
+            adj = self.graph.get_adjacent_nodes(edge, graph_metadata=metadata)
             relations = adj['relations']
             all_relations.extend(relations)
             all_documents.extend(Document(page_content=self._relation_to_string(rel)) for rel in relations)
@@ -172,9 +172,9 @@ class Agent:
             'relations': all_relations
         }
     
-    def chat_edge(self, query: str):
+    def chat_edge(self, query: str, metadata: Dict):
         # Perform search over edges and summarize any documents
-        output = self._edge_search(query)
+        output = self._edge_search(query, metadata=metadata)
         edges = output['edges']
         documents = output['documents']
         relations = output['relations']
@@ -188,7 +188,7 @@ class Agent:
         yield ChatResponse(
             sources=relations,
             type='intermediate',
-            delta=f"Summary of edges:\n{summary['output_text']}"
+            delta=f"Summary of edges:{summary['output_text']}"
         )
 
         for chunk in self._chat(query, summary, False):
@@ -198,12 +198,12 @@ class Agent:
                 delta=chunk
             )
 
-    def _raw_search(self, query: str, k: int = 3):
-        docs = self.graph.similarity_search(query, doc_type='raw')
+    def _raw_search(self, query: str, metadata: Dict, k: int = 3):
+        docs = self.graph.similarity_search(query, doc_type='raw', k=k, filter=metadata)
         all_documents: List[Document] = []
         all_relations: List[Relation] = []
         for doc in docs:
-            adj = self.graph.get_adjacent_nodes(doc)
+            adj = self.graph.get_adjacent_nodes(doc, graph_metadata=metadata)
             relations = adj['relations']
             all_relations.extend(relations)
             all_documents.extend(Document(page_content=self._relation_to_string(rel)) for rel in relations)
@@ -214,29 +214,29 @@ class Agent:
             'relations': all_relations
         }
     
-    def chat_raw(self, query: str):
+    def chat_raw(self, query: str, metadata: Dict):
         # Perform search over edges and summarize any documents
-        output = self._raw_search(query)
+        output = self._raw_search(query, metadata=metadata)
         raws = output['raws']
         documents = output['documents']
         relations = output['relations']
-        result = "Similarity Search:\n"
+        result = "Similarity Search:"
         for i, r in enumerate(raws, 1):
-            result += f"{i}. {r[:10]}...\n"
+            result += f"{i}. {r[:10]}..."
 
         result = result.rstrip()  # Remove the trailing newline if necessary
 
         yield ChatResponse(
             sources=relations,
             type='intermediate',
-            delta=result
+            delta=result + ''
         )
         # Summarize
         summary = self.summary_chain.invoke(documents)
         yield ChatResponse(
             sources=relations,
             type='intermediate',
-            delta=f"Summary of raw docs:\n{summary['output_text']}"
+            delta=f"Summary of raw docs:{summary['output_text']}"
         )
 
         for chunk in self._chat(query, summary, False):
@@ -246,18 +246,18 @@ class Agent:
                 delta=chunk
             )
 
-    def chat(self, query: str, type: Literal['node', 'edge', 'raw']):
+    def chat(self, query: str, type: Literal['node', 'edge', 'raw'], metadata: Dict):
         if type == 'node':
-            return self.chat_node(query)
+            return self.chat_node(query, metadata=metadata)
         elif type == 'edge':
-            return self.chat_edge(query)
+            return self.chat_edge(query, metadata=metadata)
         else:
-            return self.chat_raw(query)
+            return self.chat_raw(query, metadata=metadata)
 # agent = Agent()
 
 # while True:
 #     query = input("Chat: ")
-#     print("Response:\n")
+#     print("Response:")
 #     for token in agent.chat(query):
 #         print(token, end='', flush=True)
-#     print("\n")
+#     print("")

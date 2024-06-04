@@ -1,13 +1,14 @@
 import os
 from time import time
-from langchain.embeddings.ollama import OllamaEmbeddings
-from langchain_chroma import Chroma
+from langchain_community.embeddings.ollama import OllamaEmbeddings
 from langchain.embeddings.base import Embeddings
 from langchain.chat_models.base import BaseChatModel
 from langchain_groq import ChatGroq
 from langchain.docstore.document import Document
 from typing import List, Optional, Dict, Any, Literal, Generator, Set
 from langchain_core.output_parsers import JsonOutputParser
+from langchain_core.vectorstores import VectorStore
+from langchain_pinecone import PineconeVectorStore
 from .prompts import EXTRACT_PROMPT, METADATA_PROMPT
 from langchain.prompts import ChatPromptTemplate
 from .utils.logger import get_logger
@@ -28,7 +29,7 @@ class Neo4jGraphstore:
         node_type: Optional[List[str] | str] = None,
         edge_type: Optional[List[str] | str] = None,
         metadata_prompt: ChatPromptTemplate = METADATA_PROMPT,
-        persist_directory: str = "./local/vectorstore",
+        vectorstore: Optional[VectorStore] = None,
         neo4j_uri: str = os.getenv("NEO4J_URI"),
         neo4j_user: str = os.getenv("NEO4J_USER"),
         neo4j_password: str = os.getenv("NEO4J_PASSWORD")
@@ -61,60 +62,101 @@ class Neo4jGraphstore:
         self.metadata_chain = self.metadata_prompt | self.llm | JsonOutputParser()
 
         self.collection_name = collection_name
-        self.persist_directory = persist_directory
-        self.vectorstore = Chroma(
-            collection_name=self.collection_name,
-            embedding_function=self.embeddings_model,
-            persist_directory=self.persist_directory,
+        self.vectorstore = vectorstore or PineconeVectorStore(
+            embedding=self.embeddings_model,
+            index_name=self.collection_name
         )
-        self.vectorstore._client_settings.allow_reset = True
 
         self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
-    def reset(self):
-        with self.driver.session() as session:
-            session.run("MATCH (n) DETACH DELETE n")
-        self.vectorstore._client.reset()
-        return True
 
-    def extract_relations(self, documents: List[Document], stream: bool = False) -> List[List[Relation]]:
+    def extract_relations(
+        self, 
+        documents: List[Document], 
+        stream: bool = False, 
+        metadata: Optional[Dict] = None
+    ) -> List[List[Relation]]:
+        if not metadata:
+            metadata = {}
         if not stream:
             start = time()
             batch_input = [{'input': doc.page_content} for doc in documents]
             batch_response: List[List[Dict]] = self.graph_chain.batch(batch_input)
             logger.debug(f"{len(documents)} Relations generated in {time() - start}")
-            formatted_batch_response = [[Relation(**relation) for relation in response] for response in batch_response]
+            formatted_batch_response = []
+            for response in batch_response:
+                relations = []
+                if not response:
+                    continue
+                for relation in response:
+                    # Add metadata into relations before adding it to the pydantic object
+                    relation['node_1'].setdefault('metadata', {}).update(metadata)
+                    relation['node_2'].setdefault('metadata', {}).update(metadata)
+                    relation['edge'].setdefault('metadata', {}).update(metadata)
+                    relations.append(Relation(**relation))
+                formatted_batch_response.append(relations)
             return formatted_batch_response
         else:
-            return self._extract_relation_streaming(documents)
+            return self._extract_relation_streaming(documents, metadata=metadata)
 
-    def _extract_relation_streaming(self, documents: List[Document]) -> Generator[List[Relation], Any, None]:
+
+    def _extract_relation_streaming(
+        self, 
+        documents: List[Document],
+        metadata: Optional[Dict] = None
+    ) -> Generator[List[Relation], Any, None]:
         start = time()
         for doc in documents:
             relation_list = self.graph_chain.invoke({'input': doc.page_content})
-            yield [Relation(**rel) for rel in relation_list]
+            if relation_list:
+                yield_list = []
+                for rel in relation_list:
+                    rel['node_1'].setdefault('metadata', {}).update(metadata)
+                    rel['node_2'].setdefault('metadata', {}).update(metadata)
+                    rel['edge'].setdefault('metadata', {}).update(metadata)
+                    yield_list.append(Relation(**rel))
+                yield yield_list
         logger.debug(f"{len(documents)} Relations generated in {time() - start}")
 
-    def add(self, documents: List[Document], relations: Optional[List[List[Relation]]] = None, stream: bool = False):
+
+    def add(
+            self, 
+            documents: List[Document], 
+            relations: Optional[List[List[Relation]]] = None, 
+            stream: bool = False, 
+            metadata: Optional[Dict] = None
+        ):
         if stream:
-            return self._add_streaming(documents=documents, relations=relations)
-        relations = relations or self.extract_relations(documents)
+            return self._add_streaming(documents=documents, relations=relations, metadata=metadata)
+        relations = relations or self.extract_relations(documents, metadata=metadata)
         start = time()
-        self._add_to_vectorstore(documents=documents, relations=relations)
-        self._add_to_database(documents=documents, relations=relations)
+        self._add_to_vectorstore(documents=documents, relations=relations, metadata=metadata)
+        self._add_to_database(documents=documents, relations=relations, metadata=metadata)
         logger.debug(f"Documents and Relations added in {time() - start}")
         return {'documents': documents, 'relations': relations}
 
-    def _add_streaming(self, documents: List[Document], relations: Optional[List[List[Relation]]] = None):
-        rel_stream = relations or self.extract_relations(documents, stream=True)
+
+    def _add_streaming(
+            self, 
+            documents: List[Document], 
+            relations: Optional[List[List[Relation]]] = None, 
+            metadata: Optional[Dict] = None
+        ):
+        rel_stream = relations or self.extract_relations(documents, metadata=metadata, stream=True)
         final_relations: List[List[Relation]] = []
         for rel_list, doc in zip(rel_stream, documents):
             yield {'document': doc, 'relations': rel_list}
             final_relations.append(rel_list)
-        self._add_to_vectorstore(documents=documents, relations=final_relations)
-        self._add_to_database(documents=documents, relations=final_relations)
+        self._add_to_vectorstore(documents=documents, relations=final_relations, metadata=metadata)
+        self._add_to_database(documents=documents, relations=final_relations, metadata=metadata)
 
-    def _add_to_vectorstore(self, documents: List[Document], relations: List[List[Relation]]):
+
+    def _add_to_vectorstore(
+            self, 
+            documents: List[Document], 
+            relations: List[List[Relation]],
+            metadata: Optional[Dict] = None
+        ):
         node_set: Set[str] = set()
         node_documents: List[Document] = []
         node_ids: List[str] = []
@@ -134,7 +176,8 @@ class Neo4jGraphstore:
                         Document(
                             page_content=rel.node_1.name, 
                             metadata={
-                                'doc_type': 'node'
+                                'doc_type': 'node',
+                                **metadata
                             }
                         )
                     )
@@ -146,7 +189,8 @@ class Neo4jGraphstore:
                         Document(
                             page_content=rel.node_2.name, 
                             metadata={
-                                'doc_type': 'node'
+                                'doc_type': 'node',
+                                **metadata
                             }
                         )
                     )
@@ -161,10 +205,11 @@ class Neo4jGraphstore:
                                 'doc_type': 'edge',
                                 'source_node': rel.node_1.id,
                                 'target_node': rel.node_2.id,
+                                **metadata
                             }
                         )
                     )
-                    #TODO: decide id based on (node, edge, node) or (node, edge, node, document)?
+                    #TODO: decide id based on (node, edge, node, metadata) or (node, edge, node, document, metadata)?
                     edge_ids.append(edge_id)
                     edge_set.add(edge_id)
 
@@ -174,25 +219,44 @@ class Neo4jGraphstore:
                         page_content=document.page_content, 
                         metadata={
                             'doc_type': 'raw',
+                            **metadata
                         }
                     )
                 )
-                raw_ids.append(page_content)
+                d_id = generate_id(page_content=document.page_content, **metadata)
+                raw_ids.append(d_id)
                 document_set.add(page_content)
 
         ids = self.vectorstore.add_documents(
             documents=node_documents + edge_documents + raw_documents,
-            ids=node_ids + edge_ids + [generate_id(i) for i in raw_ids]
+            ids=node_ids + edge_ids + raw_ids
         )
         return ids
 
-    def _add_to_database(self, documents: List[Document], relations: List[List[Relation]]):
-            document_ids = [generate_id(doc.page_content) for doc in documents]
+
+    def _add_to_database(
+            self, 
+            documents: List[Document], 
+            relations: List[List[Relation]],
+            metadata: Optional[Dict] = None
+        ):
+            document_ids = [generate_id(**{**metadata, 'page_content': doc.page_content}) for doc in documents]
             with self.driver.session() as session:
                 for document, document_relations, document_id in zip(documents, relations, document_ids):
-                    self.insert_relation(session, document, document_relations, document_id)
+                    self.insert_relation(session, document, document_relations, document_id, metadata)
 
-    def insert_relation(self, session: Session, document: Document, relations: List[Relation], document_id: Optional[str] = None):
+
+    def insert_relation(
+            self, 
+            session: Session, 
+            document: Document, 
+            relations: List[Relation], 
+            document_id: Optional[str] = None,
+            graph_metadata: Optional[Dict[str, Any]] = None
+        ):
+        if not graph_metadata:
+            graph_metadata = {}
+
         if not document_id:
             document_id = self.generate_hash(document.page_content)
 
@@ -201,24 +265,52 @@ class Neo4jGraphstore:
         metadata['type'] = document.type
         metadata['id'] = document_id
 
-        create_relations_query = """
-        MERGE (d:Document {id: $doc_id})
-        SET d += $metadata
+        # Combine document metadata with graph metadata
+        combined_metadata = {**metadata, **graph_metadata}
+
+        # Generate the SET clauses
+        document_set_clause = ', '.join([f"d.{key} = $combined_metadata.{key}" for key in combined_metadata.keys()])
+        node_set_clause = ', '.join([f"n1.{key} = $graph_metadata.{key}" for key in graph_metadata.keys()])
+        edge_set_clause = ', '.join([f"r.{key} = $graph_metadata.{key}" for key in graph_metadata.keys()])
+        from_set_clause1 = ', '.join([f"f1.{key} = $graph_metadata.{key}" for key in graph_metadata.keys()])
+        from_set_clause2 = ', '.join([f"f2.{key} = $graph_metadata.{key}" for key in graph_metadata.keys()])
+
+        create_relations_query = f"""
+        MERGE (d:Document {{id: $doc_id}})
+        SET {document_set_clause}
         WITH d
         UNWIND $relations AS rel
-        MERGE (n1:Node {name: rel.node_1.name, id: rel.node_1.id})
-        MERGE (n2:Node {name: rel.node_2.name, id: rel.node_2.id})
-        MERGE (n1)-[:Edge {name: rel.edge.name, document_id: $doc_id, id: rel.edge.id}]->(n2)
-        MERGE (n1)-[:From {document_id: $doc_id}]->(d)
-        MERGE (n2)-[:From {document_id: $doc_id}]->(d)
+        MERGE (n1:Node {{name: rel.node_1.name, id: rel.node_1.id, {', '.join([f'{key}: $graph_metadata.{key}' for key in graph_metadata.keys()])}}})
+        ON CREATE SET {node_set_clause}
+        MERGE (n2:Node {{name: rel.node_2.name, id: rel.node_2.id, {', '.join([f'{key}: $graph_metadata.{key}' for key in graph_metadata.keys()])}}})
+        ON CREATE SET {node_set_clause.replace("n1", "n2")}
+        MERGE (n1)-[r:Edge {{name: rel.edge.name, document_id: $doc_id, id: rel.edge.id, {', '.join([f'{key}: $graph_metadata.{key}' for key in graph_metadata.keys()])}}}]->(n2)
+        ON CREATE SET {edge_set_clause}
+        MERGE (n1)-[f1:From {{document_id: $doc_id, {', '.join([f'{key}: $graph_metadata.{key}' for key in graph_metadata.keys()])}}}]->(d)
+        ON CREATE SET {from_set_clause1}
+        MERGE (n2)-[f2:From {{document_id: $doc_id, {', '.join([f'{key}: $graph_metadata.{key}' for key in graph_metadata.keys()])}}}]->(d)
+        ON CREATE SET {from_set_clause2}
         """
 
-        session.run(create_relations_query, doc_id=document_id, metadata=metadata, relations=[rel.model_dump() for rel in relations])
+        session.run(create_relations_query, doc_id=document_id, combined_metadata=combined_metadata, graph_metadata=graph_metadata, relations=[rel.model_dump() for rel in relations])
 
-    def generate_filter(self, query: str):
+
+    def generate_filter(
+            self, 
+            query: str
+    ):
         return self.metadata_chain.invoke({'input': query})
 
-    def similarity_search(self, query: str, filter: Optional[Dict] = None, doc_type: Optional[Literal['raw', 'node', 'edge']] = None, k: int = 5, return_documents: bool = False, **kwargs) -> List[Document] | List[str]:
+
+    def similarity_search(
+            self, 
+            query: str, 
+            filter: Optional[Dict] = None, 
+            doc_type: Optional[Literal['raw', 'node', 'edge']] = None, 
+            k: int = 5, 
+            return_documents: bool = False, 
+            **kwargs
+    ) -> List[Document] | List[str]:
         if not doc_type:
             doc_type = "raw"
         if filter and doc_type:
@@ -231,17 +323,26 @@ class Neo4jGraphstore:
         else:
             return [doc.page_content for doc in docs]
 
-    def get_adjacent_edges(self, node_name: str, edge_direction: Literal['both', 'incoming', 'outgoing'] = 'both') -> Dict[str, List[Relation]]:
+
+    def get_adjacent_edges(
+            self, 
+            node_name: str, 
+            edge_direction: Literal['both', 'incoming', 'outgoing'] = 'both',
+            graph_metadata: Optional[Dict] = None
+    ) -> Dict[str, List[Relation]]:
+        if graph_metadata:
+            graph_metadata.pop("doc_type", None)
+        n_metadata_conditions = ' AND '.join([f"n.{key} = $metadata.{key}" for key in graph_metadata.keys()])
+        m_metadata_conditions = ' AND '.join([f"m.{key} = $metadata.{key}" for key in graph_metadata.keys()])
         with self.driver.session() as session:
             edges = {'outgoing': [], 'incoming': [], 'records': []}
-
             if edge_direction in ['both', 'outgoing']:
                 result = session.run(
-                    """
-                    MATCH (n {name: $node_name})-[r]->(m)
-                    WHERE NOT m:Document
+                    f"""
+                    MATCH (n {{name: $node_name}})-[r]->(m)
+                    WHERE {n_metadata_conditions} AND {m_metadata_conditions} AND NOT m:Document
                     RETURN n as source, r as edge, m as target
-                    """, node_name=node_name
+                    """, node_name=node_name, metadata=graph_metadata
                 )
                 for record in result:
                     edges['records'].append(record)
@@ -272,11 +373,11 @@ class Neo4jGraphstore:
 
             if edge_direction in ['both', 'incoming']:
                 result = session.run(
-                    """
-                    MATCH (n {name: $node_name})<-[r]-(m)
-                    WHERE NOT m:Document
+                    f"""
+                    MATCH (n {{name: $node_name}})<-[r]-(m)
+                    WHERE {n_metadata_conditions} AND {m_metadata_conditions} AND NOT m:Document
                     RETURN n as target, r as edge, m as source
-                    """, node_name=node_name
+                    """, node_name=node_name, metadata=graph_metadata
                 )
                 for record in result:
                     edges['records'].append(record)
@@ -307,16 +408,27 @@ class Neo4jGraphstore:
 
             return edges
 
-    def get_adjacent_nodes(self, edge_name: str) -> Dict[str, List[Relation]]:
+
+    def get_adjacent_nodes(
+            self, 
+            edge_name: str,
+            graph_metadata: Optional[Dict] = None
+    ) -> Dict[str, List[Relation]]:
+        if not graph_metadata:
+            graph_metadata = {}
+        if graph_metadata:
+            graph_metadata.pop("doc_type", None)
+        n_metadata_conditions = ' AND '.join([f"n.{key} = $metadata.{key}" for key in graph_metadata.keys()])
+        m_metadata_conditions = ' AND '.join([f"m.{key} = $metadata.{key}" for key in graph_metadata.keys()])
         with self.driver.session() as session:
             edges = {'relations': [], 'records': []}
 
             result = session.run(
-                """
-                MATCH (n)-[r:Edge {name: $edge_name}]->(m)
-                WHERE NOT m:Document
+                f"""
+                MATCH (n)-[r:Edge {{name: $edge_name}}]->(m)
+                WHERE {n_metadata_conditions} AND {m_metadata_conditions} AND NOT m:Document
                 RETURN n as source, r as edge, m as target
-                """, edge_name=edge_name
+                """, edge_name=edge_name, metadata=graph_metadata
             )
             for record in result:
                 edges['records'].append(record)
@@ -346,15 +458,28 @@ class Neo4jGraphstore:
                 edges['relations'].append(relation)
             return edges
 
-    def get_relations_from_document(self, document_id: str) -> List[Relation]:
-        query = """
-        MATCH (d:Document {id: $document_id})
-        MATCH (n1)-[r {document_id: $document_id}]->(n2)
-        WHERE NOT r:From
+
+    def get_relations_from_document(
+            self, 
+            document_id: str,
+            graph_metadata: Optional[Dict] = None
+    ) -> List[Relation]:
+        if not graph_metadata:
+            graph_metadata = {}
+        if graph_metadata:
+            graph_metadata.pop("doc_type", None)
+        d_metadata_conditions = ' AND '.join([f"d.{key} = $metadata.{key}" for key in graph_metadata.keys()])
+        n1_metadata_conditions = ' AND '.join([f"n1.{key} = $metadata.{key}" for key in graph_metadata.keys()])
+        n2_metadata_conditions = ' AND '.join([f"n2.{key} = $metadata.{key}" for key in graph_metadata.keys()])
+        query = f"""
+        MATCH (d:Document {{id: $document_id}})
+        WHERE {d_metadata_conditions}
+        MATCH (n1)-[r {{document_id: $document_id}}]->(n2)
+        WHERE NOT r:From AND {n1_metadata_conditions} AND {n2_metadata_conditions}
         RETURN n1, r, n2
         """
         with self.driver.session() as session:
-            result = session.run(query, document_id=document_id)
+            result = session.run(query, document_id=document_id, metadata=graph_metadata)
             relations = []
             for record in result:
                 source_metadata = dict(record['n1'])
@@ -383,7 +508,13 @@ class Neo4jGraphstore:
                 relations.append(relation)
             return relations
 
-    def find_paths(self, start_node: str, end_node: str, max_depth: int = 3) -> List[Dict[str, Any]]:
+
+    def find_paths(
+            self, 
+            start_node: str, 
+            end_node: str, 
+            max_depth: int = 3
+    ) -> List[Dict[str, Any]]:
         with self.driver.session() as session:
             result = session.run(
                 f"""
@@ -399,6 +530,105 @@ class Neo4jGraphstore:
                 path = {'start_node': nodes[0]['name'], 'end_node': nodes[-1]['name'], 'nodes': nodes, 'relationships': relationships}
                 paths.append(path)
             return paths
+    
+
+    def _delete_from_graph(
+            self, 
+            metadata: Dict[str, Any]
+    ) -> Dict[str, List[str]]:
+        if not metadata:
+            raise ValueError("Metadata cannot be empty. If left empty, it will delete the whole graph!")
+
+        # Generate the WHERE clause to match entities based on the provided metadata
+        d_metadata_conditions = ' AND '.join([f"d.{key} = $metadata.{key}" for key in metadata.keys()])
+        n_metadata_conditions = ' AND '.join([f"n.{key} = $metadata.{key}" for key in metadata.keys()])
+        r_metadata_conditions = ' AND '.join([f"r.{key} = $metadata.{key}" for key in metadata.keys()])
+        f_metadata_conditions = ' AND '.join([f"f.{key} = $metadata.{key}" for key in metadata.keys()])
+
+        with self.driver.session() as session:
+            # Match and collect document IDs
+            document_result = session.run(
+                f"""
+                MATCH (d:Document)
+                WHERE {d_metadata_conditions}
+                RETURN d.id as document_id
+                """, metadata=metadata
+            )
+            document_ids = [record["document_id"] for record in document_result]
+
+            # Match and collect node IDs
+            node_result = session.run(
+                f"""
+                MATCH (n:Node)
+                WHERE {n_metadata_conditions}
+                RETURN n.id as node_id
+                """, metadata=metadata
+            )
+            node_ids = [record["node_id"] for record in node_result]
+
+            # Match and collect edge IDs
+            edge_result = session.run(
+                f"""
+                MATCH ()-[r:Edge]->()
+                WHERE {r_metadata_conditions}
+                RETURN r.id as edge_id
+                """, metadata=metadata
+            )
+            edge_ids = [record["edge_id"] for record in edge_result]
+
+            # Delete documents, nodes, edges, and relationships
+            delete_query = f"""
+            MATCH (d:Document)
+            WHERE {d_metadata_conditions}
+            DETACH DELETE d
+            WITH COUNT(d) AS deleted_docs
+
+            MATCH (n:Node)
+            WHERE {n_metadata_conditions}
+            DETACH DELETE n
+            WITH COUNT(n) AS deleted_nodes
+
+            MATCH ()-[r:Edge]->()
+            WHERE {r_metadata_conditions}
+            DELETE r
+            WITH COUNT(r) AS deleted_edges
+
+            MATCH ()-[f:From]->()
+            WHERE {f_metadata_conditions}
+            DELETE f
+            """
+
+            session.run(delete_query, metadata=metadata)
+
+            return {
+                'document_ids': document_ids,
+                'node_ids': node_ids,
+                'edge_ids': edge_ids,
+                'ids': document_ids + node_ids + edge_ids
+            }
+
+    def _delete_from_vectorstore(
+            self,
+            ids: List[str]
+    ) -> Optional[bool]:
+        output = self.vectorstore.delete(ids=ids)
+        return output
+    
+    def reset(
+            self,
+            metadata: Dict
+    ) -> Optional[bool]:
+        ids = self._delete_from_graph(metadata)['ids']
+
+        if ids:
+            output = self._delete_from_vectorstore(ids=ids)
+            logger.debug(f"Deleted {len(ids)} vectors/rows")
+        else:
+            return True
+        return output
+
+
+
 
 if __name__ == "__main__":
     from langchain.docstore.document import Document
@@ -422,5 +652,4 @@ if __name__ == "__main__":
     """)
     documents = [Document(page_content=ex.strip()) for ex in text.split(">>")]
     graph = Neo4jGraphstore()
-    graph.reset()
     graph.add(documents)
