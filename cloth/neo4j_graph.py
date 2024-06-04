@@ -208,7 +208,7 @@ class Neo4jGraphstore:
         UNWIND $relations AS rel
         MERGE (n1:Node {name: rel.node_1.name, id: rel.node_1.id})
         MERGE (n2:Node {name: rel.node_2.name, id: rel.node_2.id})
-        MERGE (n1)-[:Edge {name: rel.edge.name, document_id: $doc_id}]->(n2)
+        MERGE (n1)-[:Edge {name: rel.edge.name, document_id: $doc_id, id: rel.edge.id}]->(n2)
         MERGE (n1)-[:From {document_id: $doc_id}]->(d)
         MERGE (n2)-[:From {document_id: $doc_id}]->(d)
         """
@@ -231,43 +231,157 @@ class Neo4jGraphstore:
         else:
             return [doc.page_content for doc in docs]
 
-    def get_adjacent_edges(self, node_name: str, edge_direction: str = 'both') -> Dict[str, List[Dict[str, Any]]]:
-        with self.neo4j_driver.session() as session:
-            edges = {'outgoing': [], 'incoming': []}
+    def get_adjacent_edges(self, node_name: str, edge_direction: Literal['both', 'incoming', 'outgoing'] = 'both') -> Dict[str, List[Relation]]:
+        with self.driver.session() as session:
+            edges = {'outgoing': [], 'incoming': [], 'records': []}
 
             if edge_direction in ['both', 'outgoing']:
                 result = session.run(
                     """
                     MATCH (n {name: $node_name})-[r]->(m)
                     WHERE NOT m:Document
-                    RETURN r, m.name AS target_node_name, labels(m) AS target_labels
+                    RETURN n as source, r as edge, m as target
                     """, node_name=node_name
                 )
                 for record in result:
-                    edges['outgoing'].append({
-                        'start': node_name,
-                        'end': record['target_node_name'],
-                        'edge': Edge(id=record['r'].id, name=record['r'].type, type=record['r'].type),
-                        'target_node': Node(id=record['r'].end_node.id, name=record['target_node_name'], type=record['target_labels'][0])
-                    })
+                    edges['records'].append(record)
+                    source_metadata = dict(record['source'])
+                    edge_metadata = dict(record['edge'])
+                    target_metadata = dict(record['target'])
+                    node_1 = Node(
+                        id=source_metadata.pop('id'),
+                        name=source_metadata.pop('name'), 
+                        metadata=source_metadata
+                    )
+                    edge = Edge(
+                        id=edge_metadata.pop('id'),
+                        name=edge_metadata.pop('name'), 
+                        metadata=edge_metadata
+                    )
+                    node_2 = Node(
+                        id=target_metadata.pop('id'),
+                        name=target_metadata.pop('name'), 
+                        metadata=target_metadata
+                    )
+                    relation = Relation(
+                        node_1=node_1,
+                        edge=edge,
+                        node_2=node_2,
+                    )
+                    edges['outgoing'].append(relation)
 
             if edge_direction in ['both', 'incoming']:
                 result = session.run(
                     """
                     MATCH (n {name: $node_name})<-[r]-(m)
                     WHERE NOT m:Document
-                    RETURN r, m.name AS source_node_name, labels(m) AS source_labels
+                    RETURN n as target, r as edge, m as source
                     """, node_name=node_name
                 )
                 for record in result:
-                    edges['incoming'].append({
-                        'start': record['source_node_name'],
-                        'end': node_name,
-                        'edge': Edge(id=record['r'].id, name=record['r'].type, type=record['r'].type),
-                        'source_node': Node(id=record['r'].start_node.id, name=record['source_node_name'], type=record['source_labels'][0])
-                    })
+                    edges['records'].append(record)
+                    source_metadata = dict(record['source'])
+                    edge_metadata = dict(record['edge'])
+                    target_metadata = dict(record['target'])
+                    node_1 = Node(
+                        id=source_metadata.pop('id'),
+                        name=source_metadata.pop('name'), 
+                        metadata=source_metadata
+                    )
+                    edge = Edge(
+                        id=edge_metadata.pop('id'),
+                        name=edge_metadata.pop('name'), 
+                        metadata=edge_metadata
+                    )
+                    node_2 = Node(
+                        id=target_metadata.pop('id'),
+                        name=target_metadata.pop('name'), 
+                        metadata=target_metadata
+                    )
+                    relation = Relation(
+                        node_1=node_1,
+                        edge=edge,
+                        node_2=node_2
+                    )
+                    edges['incoming'].append(relation)
 
             return edges
+
+    def get_adjacent_nodes(self, edge_name: str) -> Dict[str, List[Relation]]:
+        with self.driver.session() as session:
+            edges = {'relations': [], 'records': []}
+
+            result = session.run(
+                """
+                MATCH (n)-[r:Edge {name: $edge_name}]->(m)
+                WHERE NOT m:Document
+                RETURN n as source, r as edge, m as target
+                """, edge_name=edge_name
+            )
+            for record in result:
+                edges['records'].append(record)
+                source_metadata = dict(record['source'])
+                edge_metadata = dict(record['edge'])
+                target_metadata = dict(record['target'])
+                node_1 = Node(
+                    id=source_metadata.pop('id'),
+                    name=source_metadata.pop('name'), 
+                    metadata=source_metadata
+                )
+                edge = Edge(
+                    id=edge_metadata.pop('id'),
+                    name=edge_metadata.pop('name'), 
+                    metadata=edge_metadata
+                )
+                node_2 = Node(
+                    id=target_metadata.pop('id'),
+                    name=target_metadata.pop('name'), 
+                    metadata=target_metadata
+                )
+                relation = Relation(
+                    node_1=node_1,
+                    edge=edge,
+                    node_2=node_2,
+                )
+                edges['relations'].append(relation)
+            return edges
+
+    def get_relations_from_document(self, document_id: str) -> List[Relation]:
+        query = """
+        MATCH (d:Document {id: $document_id})
+        MATCH (n1)-[r {document_id: $document_id}]->(n2)
+        WHERE NOT r:From
+        RETURN n1, r, n2
+        """
+        with self.driver.session() as session:
+            result = session.run(query, document_id=document_id)
+            relations = []
+            for record in result:
+                source_metadata = dict(record['n1'])
+                edge_metadata = dict(record['r'])
+                target_metadata = dict(record['n2'])
+                node_1 = Node(
+                    id=source_metadata.pop('id'),
+                    name=source_metadata.pop('name'), 
+                    metadata=source_metadata
+                )
+                edge = Edge(
+                    id=edge_metadata.pop('id'),
+                    name=edge_metadata.pop('name'), 
+                    metadata=edge_metadata
+                )
+                node_2 = Node(
+                    id=target_metadata.pop('id'),
+                    name=target_metadata.pop('name'), 
+                    metadata=target_metadata
+                )
+                relation = Relation(
+                    node_1=node_1,
+                    edge=edge,
+                    node_2=node_2,
+                )
+                relations.append(relation)
+            return relations
 
     def find_paths(self, start_node: str, end_node: str, max_depth: int = 3) -> List[Dict[str, Any]]:
         with self.driver.session() as session:

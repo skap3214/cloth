@@ -1,22 +1,10 @@
-from typing import Optional, Literal
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 from .extract import extract
 from .config import Config
+from .types import GraphChat, GraphAdd
 import json
-
-# Types
-
-class GraphAdd(BaseModel):
-    user_id: Optional[str] = None
-    text: str
-    init: bool = False
-
-class GraphChat(BaseModel):
-    query: str
-    chat_type: Literal['node', 'edge', 'raw']
 
 #######
 
@@ -44,8 +32,6 @@ def graph_add(data: GraphAdd):
 
     def stream():
         for chunk in add_stream:
-            document = chunk['document']
-            relations = chunk['relations']
             chunk = {
                 'document': {'page_content': chunk['document'].page_content, 'metadata': chunk['document'].metadata},
                 'relations': [rel.model_dump() for rel in chunk['relations']]
@@ -56,4 +42,13 @@ def graph_add(data: GraphAdd):
 
 @app.post("/chat")
 def graph_chat(data: GraphChat):
-    pass
+    agent = Config.AGENT
+    chat_stream = agent.chat(data.query, data.chat_type)
+
+    def stream():
+        for chunk in chat_stream:
+            chunk = chunk.model_dump()
+            yield json.dumps(chunk).encode()
+    
+    return StreamingResponse(stream())
+

@@ -32,7 +32,9 @@ The type of relations you need to extract are listed below:
 Format your output as a list of json. Each element of the list contains a pair of terms
 and the relation between them, like the following:
 """ + EXTRACT_FORMAT_PROMPT + """
-Make sure the strings are in doulbe quotes, escape special characters when needed, and your response should start and end with '[' and ']'
+Make sure the strings are in double quotes, escape special characters when needed, \
+all nodes and edge names should be title cased, \
+and your response should start and end with '[' and ']' \
 """
 
 EXTRACT_HUMAN_PROMPT = "context: ```{input}``` ONLY output the valid  JSON object. Start your response with ["
