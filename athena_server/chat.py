@@ -20,7 +20,7 @@ You are a personal assistant that is tasked with helping the user answer questio
 Here is a summary of the relevant information from the knowledge graph:
 {information}\
 
-Your answer to the user's query should be direct, to the point.\
+Based on the information given to you, answer the user's query. Answer in markdown.
 """
 
 MAP_PROMPT = """You are given Source, Link, Target pairs from a part of a knowledge graph within the delimiters:
@@ -147,14 +147,13 @@ class Agent:
             type='intermediate',
             delta=f" *{summary['output_text']}* "
         )
-        print(f"Output:")
         output = ""
         for chunk in self._chat(query, summary, False):
             output += chunk
         yield ChatResponse(
             sources=relations,
             type='output',
-            delta=f" **{output}**"
+            delta=f"{output}"
         )
 
     def _edge_search(self, query: str, metadata: Dict, k: int = 7) -> Dict[str, Any]:

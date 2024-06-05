@@ -70,7 +70,6 @@ def graph_chat(data: GraphChat):
     def stream():
         for chunk in chat_stream:
             chunk = chunk.model_dump()
-            print(chunk['delta'])
             yield json.dumps(chunk).encode()
     
     return StreamingResponse(stream(), media_type="application/json")
