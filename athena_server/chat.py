@@ -4,7 +4,6 @@ from langchain.memory import ConversationBufferMemory
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder, SystemMessagePromptTemplate, HumanMessagePromptTemplate, PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
-from langchain.chains.summarize import load_summarize_chain
 from langchain.chains.combine_documents.map_reduce import MapReduceDocumentsChain, ReduceDocumentsChain
 from langchain.chains.combine_documents.stuff import StuffDocumentsChain
 from langchain.chains.llm import LLMChain
@@ -135,17 +134,18 @@ class Agent:
         nodes = output['nodes']
         documents = output['documents']
         relations = output['relations']
+        bulleted_nodes = '\n\n'.join(['- Node: ' + node for node in nodes])
         yield ChatResponse(
             sources=relations,
             type='intermediate',
-            delta=f"Summarizing the surroundings of these nodes: {', '.join(nodes)}"
+            delta=f"{bulleted_nodes}"
         )
         # Summarize
         summary = self.summary_chain.invoke(documents)
         yield ChatResponse(
             sources=relations,
             type='intermediate',
-            delta=f"Summary of nodes:{summary['output_text']}Output:"
+            delta=f" *{summary['output_text']}* "
         )
         print(f"Output:")
         output = ""
@@ -154,7 +154,7 @@ class Agent:
         yield ChatResponse(
             sources=relations,
             type='output',
-            delta=output
+            delta=f" **{output}**"
         )
 
     def _edge_search(self, query: str, metadata: Dict, k: int = 7) -> Dict[str, Any]:
