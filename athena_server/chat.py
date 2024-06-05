@@ -148,12 +148,14 @@ class Agent:
             delta=f"Summary of nodes:{summary['output_text']}Output:"
         )
         print(f"Output:")
+        output = ""
         for chunk in self._chat(query, summary, False):
-            yield ChatResponse(
-                sources=relations,
-                type='output',
-                delta=chunk
-            )
+            output += chunk
+        yield ChatResponse(
+            sources=relations,
+            type='output',
+            delta=output
+        )
 
     def _edge_search(self, query: str, metadata: Dict, k: int = 7) -> Dict[str, Any]:
         # Search based on most similar nodes to the query
@@ -190,13 +192,14 @@ class Agent:
             type='intermediate',
             delta=f"Summary of edges:{summary['output_text']}"
         )
-
+        output = ""
         for chunk in self._chat(query, summary, False):
-            yield ChatResponse(
-                sources=relations,
-                type='output',
-                delta=chunk
-            )
+            output += chunk
+        yield ChatResponse(
+            sources=relations,
+            type='output',
+            delta=output
+        )
 
     def _raw_search(self, query: str, metadata: Dict, k: int = 3):
         docs = self.graph.similarity_search(query, doc_type='raw', k=k, filter=metadata)
@@ -239,12 +242,14 @@ class Agent:
             delta=f"Summary of raw docs:{summary['output_text']}"
         )
 
+        output = ""
         for chunk in self._chat(query, summary, False):
-            yield ChatResponse(
-                sources=relations,
-                type='output',
-                delta=chunk
-            )
+            output += chunk
+        yield ChatResponse(
+            sources=relations,
+            type='output',
+            delta=output
+        )
 
     def chat(self, query: str, type: Literal['node', 'edge', 'raw'], metadata: Dict):
         if type == 'node':

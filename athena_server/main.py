@@ -56,7 +56,7 @@ def graph_add(data: GraphAdd):
                 }
                 yield json.dumps(chunk).encode()
 
-        return StreamingResponse(stream())
+        return StreamingResponse(stream(), media_type="application/json")
 
 @app.post("/chat")
 def graph_chat(data: GraphChat):
@@ -73,5 +73,5 @@ def graph_chat(data: GraphChat):
             print(chunk['delta'])
             yield json.dumps(chunk).encode()
     
-    return StreamingResponse(stream())
+    return StreamingResponse(stream(), media_type="application/json")
 
