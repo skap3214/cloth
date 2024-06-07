@@ -8,6 +8,7 @@ setup(
     author="Soami Kapadia",
     author_email="kapadiasoami@gmail.com",
     long_description=open('README.md').read(),
+    long_description_content_type="text/markdown",
     url="https://github.com/skap3214/cloth",
     packages=find_packages(),
     classifiers=[
@@ -15,14 +16,14 @@ setup(
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
     ],
-    python_requires='>=3.6',
+    license="MIT",
+    python_requires='>=3.10',
     install_requires=[
-        "supabase>=2.4.5",
         "langchain-openai>=0.1.3",
         "langchain-community>=0.0.38",
         "langchain-chroma>=0.1.1",
         "langchain-groq>=0.1.3",
         "langchain>=0.1.1.6",
-        "pyvis>=0.3.2",
+        "langchain-pinecone>=0.1.1",
     ]
 )

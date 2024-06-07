@@ -1,7 +1,6 @@
 from langchain.prompts import ChatPromptTemplate
 
 
-# Prompt used to extract relations from documents
 EXTRACT_FORMAT_PROMPT = """\
 [
     {{

@@ -76,6 +76,7 @@ class Neo4jGraphstore:
         stream: bool = False, 
         metadata: Optional[Dict] = None
     ) -> List[List[Relation]]:
+
         if not metadata:
             metadata = {}
         if not stream:
@@ -607,13 +608,15 @@ class Neo4jGraphstore:
                 'ids': document_ids + node_ids + edge_ids
             }
 
+
     def _delete_from_vectorstore(
             self,
             ids: List[str]
     ) -> Optional[bool]:
         output = self.vectorstore.delete(ids=ids)
         return output
-    
+
+
     def reset(
             self,
             metadata: Dict

@@ -7,7 +7,7 @@ Better alternative to RAG combining knowledge graphs + vectorstores + databases.
 With pip
 
 ```bash
-pip install langchain
+pip install cloth
 ```
 
 ## What is Cloth
@@ -45,10 +45,10 @@ Cloth uses multiple commonly used Langchain classes making it easy to integrate 
 Cloth has only one class named `Graph` that you need to call to initialize, add, retrieve and visualize your RAG pipeline.
 
 ```python
-from cloth import Graph
+from cloth import Neo4jGraphstore
 from langchain.docstore.document import Document
 
-graph = Graph()
+graph = Neo4jGraphstore()
 
 # Prepare your data
 text = """
