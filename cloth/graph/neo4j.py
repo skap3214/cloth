@@ -9,11 +9,11 @@ from typing import List, Optional, Dict, Any, Literal, Generator, Set
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.vectorstores import VectorStore
 from langchain_pinecone import PineconeVectorStore
-from .prompts import EXTRACT_PROMPT, METADATA_PROMPT
+from ..prompts import EXTRACT_PROMPT, METADATA_PROMPT
 from langchain.prompts import ChatPromptTemplate
-from .utils.logger import get_logger
-from .utils.id import generate_id
-from .types import Relation, Node, Edge
+from ..utils.logger import get_logger
+from ..utils.id import generate_id
+from ..types import Relation, Node, Edge
 from neo4j import GraphDatabase, Session
 
 logger = get_logger()

@@ -1,6 +1,6 @@
 import sys
 sys.path.append(".")
-from cloth.neo4j_graph import Neo4jGraphstore as Graphstore
+from cloth.graph.neo4j import Neo4jGraphstore as Graphstore
 
 
 graph = Graphstore()
