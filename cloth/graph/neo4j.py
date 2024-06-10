@@ -9,16 +9,16 @@ from typing import List, Optional, Dict, Any, Literal, Generator, Set
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.vectorstores import VectorStore
 from langchain_pinecone import PineconeVectorStore
-from ..prompts import EXTRACT_PROMPT, METADATA_PROMPT
+from .prompts import EXTRACT_PROMPT, METADATA_PROMPT
 from langchain.prompts import ChatPromptTemplate
 from ..utils.logger import get_logger
 from ..utils.id import generate_id
-from ..types import Relation, Node, Edge
+from .types import Relation, Node, Edge
 from neo4j import GraphDatabase, Session
 
 logger = get_logger()
 
-class Neo4jGraphstore:
+class Neo4jVectorGraphstore:
 
     def __init__(
         self,
@@ -654,5 +654,5 @@ if __name__ == "__main__":
     The second general point to be learned from the bitter lesson is that the actual contents of minds are tremendously, irredeemably complex; we should stop trying to find simple ways to think about the contents of minds, such as simple ways to think about space, objects, multiple agents, or symmetries. All these are part of the arbitrary, intrinsically-complex, outside world. They are not what should be built in, as their complexity is endless; instead we should build in only the meta-methods that can find and capture this arbitrary complexity. Essential to these methods is that they can find good approximations, but the search for them should be by our methods, not by us. We want AI agents that can discover like we can, not which contain what we have discovered. Building in our discoveries only makes it harder to see how the discovering process can be done.\
     """)
     documents = [Document(page_content=ex.strip()) for ex in text.split(">>")]
-    graph = Neo4jGraphstore()
+    graph = Neo4jVectorGraphstore()
     graph.add(documents)

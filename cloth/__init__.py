@@ -1,5 +1,4 @@
-from .graph.neo4j import Neo4jGraphstore
-from .types import Relation
+from .graph import Neo4jGraphstore, Relation
 
 __all__ = [
     "Neo4jGraphstore",
