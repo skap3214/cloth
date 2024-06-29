@@ -10,7 +10,7 @@ from langchain.chains.llm import LLMChain
 from typing import Generator, Any, Dict, List, Optional, Literal
 from .types import ChatResponse
 from ..graph.types import Relation
-from ..graph.neo4j import Neo4jGraphstore
+from ..graph.neo4j import Neo4jVectorGraphstore
 from .prompts import SYSTEM_PROMPT, MAP_PROMPT, REDUCE_PROMPT
 
 LLM = ChatGroq(model="llama3-70b-8192", temperature=0.2)
@@ -26,7 +26,7 @@ class Agent:
         map_prompt: str = MAP_PROMPT,
         reduce_prompt: str = REDUCE_PROMPT,
         chat_memory = CHAT_MEMORY,
-        graph: Optional[Neo4jGraphstore] = None
+        graph: Optional[Neo4jVectorGraphstore] = None
     ) -> None:
         self.llm = llm
         self.system_prompt = system_prompt
@@ -63,7 +63,7 @@ class Agent:
             document_variable_name='docs',
             return_intermediate_steps=False
         )
-        self.graph = graph or Neo4jGraphstore()
+        self.graph = graph or Neo4jVectorGraphstore()
 
 
     def _chat(self, query: str, information: str, save_chat_history: bool = True) -> Generator[str, Any, None]:

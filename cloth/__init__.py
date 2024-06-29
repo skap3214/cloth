@@ -1,6 +1,6 @@
-from .graph import Neo4jGraphstore, Relation
+from .graph import Neo4jVectorGraphstore, Relation
 
 __all__ = [
-    "Neo4jGraphstore",
+    "Neo4jVectorGraphstore",
     "Relation"
 ]
