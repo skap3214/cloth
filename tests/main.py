@@ -1,13 +1,42 @@
 import sys
 sys.path.append(".")
-from cloth.neo4j_graph import Neo4jGraphstore as Graphstore
+from langchain_chroma import Chroma
+from cloth import Neo4jVectorGraphstore
+from langchain.docstore.document import Document
+from langchain_community.embeddings.ollama import OllamaEmbeddings
+from langchain_community.chat_models.ollama import ChatOllama
+from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 
+collection_name = "test"
+vectorstore = Chroma(
+    collection_name=collection_name,
+    persist_directory="./local",
+    embedding_function=OllamaEmbeddings(model="nomic-embed-text")
+)
+node_type = [
+    "object", "entity", "location", "organization", 
+    "person", "condition", "acronym", "documents", 
+    "service", "concept", "emotion", "etc..."
+]
 
-graph = Graphstore()
+uri = "bolt://localhost:7687"
+user = "neo4j"
+cloth = Neo4jVectorGraphstore(
+    collection_name=collection_name,
+    node_type=node_type,
+    vectorstore=vectorstore,
+    # neo4j_password=password,
+    neo4j_uri=uri,
+    neo4j_user=user,
+    # llm=ChatOllama(model='llava-llama3:latest', temperature=0.1),
+    llm=ChatGroq(model='llama3-70b-8192', temperature=0.0),
+    # llm=ChatOpenAI(model='gpt-3.5-turbo', temperature=0.1)
+)
+
 
 
 # Prepare
-from langchain.docstore.document import Document
 from textwrap import dedent
 text = dedent("""
 The biggest lesson that can be read from 70 years of AI research is that general methods that leverage computation are ultimately the most effective, and by a large margin. The ultimate reason for this is Moore's law, or rather its generalization of continued exponentially falling cost per unit of computation. Most AI research has been conducted as if the computation available to the agent were constant (in which case leveraging human knowledge would be one of the only ways to improve performance) but, over a slightly longer time than a typical research project, massively more computation inevitably becomes available. Seeking an improvement that makes a difference in the shorter term, researchers seek to leverage their human knowledge of the domain, but the only thing that matters in the long run is the leveraging of computation. These two need not run counter to each other, but in practice they tend to. Time spent on one is time not spent on the other. There are psychological commitments to investment in one approach or the other. And the human-knowledge approach tends to complicate methods in ways that make them less suited to taking advantage of general methods leveraging computation.  There were many examples of AI researchers' belated learning of this bitter lesson, and it is instructive to review some of the most prominent.
@@ -28,10 +57,42 @@ The second general point to be learned from the bitter lesson is that the actual
 """)
 
 documents = [Document(page_content=ex.strip()) for ex in text.split(">>")]
-len(documents)
 
 
-# Add 
-# graph.add(documents)
-similar_nodes = graph.similarity_search("What is AI?", doc_type='node')
-print(similar_nodes)
+# Remove/Reset everything
+graph_metadata = {'user_id': "soami"}
+output = cloth.reset(graph_metadata)
+print(f"Reset successful: {output}")
+# Add documents
+output = cloth.add(documents, metadata=graph_metadata)
+
+
+# Searches
+def sim_search(query):
+    docs = cloth.similarity_search(query)
+    print(f"Sim Search: {docs}")
+
+def edge_search(query):
+    doc_type = "node"
+    nodes = cloth.similarity_search(query, doc_type=doc_type, k=1)[0]
+    docs = cloth.get_adjacent_edges(node_name=nodes)
+    print(f"Edge Search: {docs}")
+
+def node_search(query):
+    doc_type = "edge"
+    nodes = cloth.similarity_search(query, doc_type=doc_type, k=1)[0]
+    docs = cloth.get_adjacent_edges(node_name=nodes)
+    print(f"Node Search: {docs}")
+
+def path_search(query):
+    # node_1, node_2 = cloth.similarity_search(query, doc_type='node', k=2)[:2]
+    node_1, node_2 = "Bitter Lesson", "Search"
+    output = cloth.find_paths(node_1, node_2)
+    return output
+
+# Example usage
+# print(sim_search("What is AI?"))
+# print(edge_search("What is AI?"))
+# print(node_search("What is AI?"))
+print(path_search("AI and Chess"))
+

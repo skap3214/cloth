@@ -1,6 +1,6 @@
 from pydantic import BaseModel, model_validator
 from cloth.utils.id import generate_id
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 from typing_extensions import Self
 
 class Node(BaseModel):
