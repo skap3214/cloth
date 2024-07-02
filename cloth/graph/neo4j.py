@@ -68,7 +68,6 @@ class Neo4jVectorGraphstore:
             embedding=self.embeddings_model,
             index_name=self.collection_name
         )
-
         self.driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_password))
 
 
@@ -259,14 +258,12 @@ class Neo4jVectorGraphstore:
             session: Session, 
             document: Document, 
             relations: List[Relation], 
-            document_id: Optional[str] = None,
+            document_id: str,
             graph_metadata: Optional[Dict[str, Any]] = None
         ):
         if not graph_metadata:
             graph_metadata = {}
 
-        if not document_id:
-            document_id = self.generate_hash(document.page_content)
 
         metadata = document.metadata
         metadata['page_content'] = document.page_content
@@ -603,19 +600,23 @@ class Neo4jVectorGraphstore:
                 for rel in relationships:
                     source_node = next(node for node in nodes if node.id == rel.start_node.id)
                     target_node = next(node for node in nodes if node.id == rel.end_node.id)
-                    
+                    source_node = dict(source_node)
+                    rel_type = rel.type
+                    rel = dict(rel)
+                    target_node = dict(target_node)
                     node_1 = Node(
-                        id=source_node['id'],
-                        name=source_node['name'],
+                        id=source_node.pop('id'),
+                        name=source_node.pop('name'),
                         metadata=dict(source_node)
                     )
                     edge = Edge(
-                        name=rel.type,
+                        name=rel['name'],
+                        type=rel_type,
                         metadata=dict(rel)
                     )
                     node_2 = Node(
-                        id=target_node['id'],
-                        name=target_node['name'],
+                        id=target_node.pop('id'),
+                        name=target_node.pop('name'),
                         metadata=dict(target_node)
                     )
                     relation = Relation(

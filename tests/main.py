@@ -4,9 +4,9 @@ from langchain_chroma import Chroma
 from cloth import Neo4jVectorGraphstore
 from langchain.docstore.document import Document
 from langchain_community.embeddings.ollama import OllamaEmbeddings
+from langchain_community.chat_models.ollama import ChatOllama
 from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
-
 
 collection_name = "test"
 vectorstore = Chroma(
@@ -22,7 +22,7 @@ node_type = [
 
 uri = "bolt://localhost:7687"
 user = "neo4j"
-password = "cloth-local"
+password = "cloth3214"
 cloth = Neo4jVectorGraphstore(
     collection_name=collection_name,
     node_type=node_type,
@@ -30,7 +30,8 @@ cloth = Neo4jVectorGraphstore(
     neo4j_password=password,
     neo4j_uri=uri,
     neo4j_user=user,
-    llm=ChatGroq(model='mixtral-8x7b-32768', temperature=0.0)
+    # llm=ChatOllama(model='llava-llama3:latest', temperature=0.1),
+    llm=ChatGroq(model='llama3-70b-8192', temperature=0.0),
     # llm=ChatOpenAI(model='gpt-3.5-turbo', temperature=0.1)
 )
 
@@ -58,8 +59,13 @@ The second general point to be learned from the bitter lesson is that the actual
 
 documents = [Document(page_content=ex.strip()) for ex in text.split(">>")]
 
+
+# Remove/Reset everything
+output = cloth.reset({})
+print(f"Reset successful: {output}")
 # Add documents
-# output = cloth.add(documents)
+output = cloth.add(documents, metadata={'user_id': "soami"})
+
 
 # Searches
 def sim_search(query):
