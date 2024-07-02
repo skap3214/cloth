@@ -22,12 +22,11 @@ node_type = [
 
 uri = "bolt://localhost:7687"
 user = "neo4j"
-password = "cloth3214"
 cloth = Neo4jVectorGraphstore(
     collection_name=collection_name,
     node_type=node_type,
     vectorstore=vectorstore,
-    neo4j_password=password,
+    # neo4j_password=password,
     neo4j_uri=uri,
     neo4j_user=user,
     # llm=ChatOllama(model='llava-llama3:latest', temperature=0.1),
