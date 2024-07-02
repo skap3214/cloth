@@ -61,10 +61,11 @@ documents = [Document(page_content=ex.strip()) for ex in text.split(">>")]
 
 
 # Remove/Reset everything
-output = cloth.reset({})
+graph_metadata = {'user_id': "soami"}
+output = cloth.reset(graph_metadata)
 print(f"Reset successful: {output}")
 # Add documents
-output = cloth.add(documents, metadata={'user_id': "soami"})
+output = cloth.add(documents, metadata=graph_metadata)
 
 
 # Searches

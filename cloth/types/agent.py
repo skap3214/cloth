@@ -1,5 +1,5 @@
 from typing import List
-from ..graph.types import Relation
+from .graph import Relation
 from pydantic import BaseModel
 
 class ChatResponse(BaseModel):

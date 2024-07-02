@@ -1,3 +1,5 @@
+from typing import Generator, Any, Dict, List, Optional, Literal
+
 from langchain_groq import ChatGroq
 from langchain.chat_models.base import BaseChatModel
 from langchain.memory import ConversationBufferMemory
@@ -7,11 +9,12 @@ from langchain_core.documents import Document
 from langchain.chains.combine_documents.map_reduce import MapReduceDocumentsChain, ReduceDocumentsChain
 from langchain.chains.combine_documents.stuff import StuffDocumentsChain
 from langchain.chains.llm import LLMChain
-from typing import Generator, Any, Dict, List, Optional, Literal
-from .types import ChatResponse
-from ..graph.types import Relation
-from ..graph.neo4j import Neo4jVectorGraphstore
-from .prompts import SYSTEM_PROMPT, MAP_PROMPT, REDUCE_PROMPT
+
+
+from cloth.types.agent import ChatResponse
+from cloth.types.graph import Relation
+from cloth.graph.neo4j import Neo4jVectorGraphstore
+from cloth.prompts.agent import SYSTEM_PROMPT, MAP_PROMPT, REDUCE_PROMPT
 
 LLM = ChatGroq(model="llama3-70b-8192", temperature=0.2)
 
