@@ -205,7 +205,7 @@ class Neo4jVectorGraphstore:
                     node_ids.append(node_id)
                     node_set.add(node_id)
 
-                if (edge_id:= rel.edge.id) not in node_set:
+                if (edge_id:= rel.edge.id) not in edge_set:
                     edge_documents.append(
                         Document(
                             page_content=rel.edge.name, 
@@ -334,7 +334,12 @@ class Neo4jVectorGraphstore:
             filter.update({'doc_type': doc_type})
         else:
             filter = {'doc_type': doc_type}
-        docs = self.vectorstore.similarity_search(query, k, filter, **kwargs)
+            docs = self.vectorstore.similarity_search(
+            query=query, 
+            k=k, 
+            filter=filter, 
+            **kwargs
+        )
         if return_documents:
             return docs
         else:
@@ -347,6 +352,7 @@ class Neo4jVectorGraphstore:
             edge_direction: Literal['both', 'incoming', 'outgoing'] = 'both',
             graph_metadata: Optional[Dict] = None
     ) -> Dict[str, List[Relation]]:
+        """records, incoming, outgoing"""
         if graph_metadata:
             graph_metadata.pop("doc_type", None)
             n_metadata_conditions = ' AND '.join([f"n.{key} = $metadata.{key}" for key in graph_metadata.keys()])
@@ -713,7 +719,7 @@ class Neo4jVectorGraphstore:
             self,
             ids: List[str]
     ) -> Optional[bool]:
-        output = self.vectorstore.delete(ids=ids)
+        output = self.vectorstore.delete(ids=list(set(ids)))
         return output
 
 
